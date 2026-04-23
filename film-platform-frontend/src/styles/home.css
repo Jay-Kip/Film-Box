@@ -1,0 +1,245 @@
+/* RESET */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: black;
+  font-family: 'Inter', sans-serif;
+  overflow-x: hidden; /* 🔥 removes side gaps */
+}
+
+/* HERO */
+.hero {
+  position: relative;
+  width: 100vw;
+  min-height: 100vh;
+  color: white;
+  overflow: hidden;
+}
+
+/* BACKGROUND */
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  background: url("Thumb2.png") no-repeat center center/cover;
+  z-index: 0;
+}
+
+/* 🔥 EDGE + BOTTOM FADE (MERGED FIX) */
+.hero-bg::after {
+  content: "";
+  position: relative;
+  pointer-events: none;
+  inset: 0;
+  background: radial-gradient(
+      circle,
+      rgba(0,0,0,0) 55%,
+      rgba(0,0,0,0.9) 100%
+    ),
+    linear-gradient(
+      to top,
+      rgba(0,0,0,0.85),
+      rgba(0,0,0,0.2)
+    );
+}
+
+/* CONTENT */
+.hero-content {
+  position: relative;
+  right: 0;
+  top: 0;
+  height: 100%;
+  width: 50%;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  justify-content: center;
+
+  padding: 60px;
+  z-index: 2;
+}
+
+/* TOP SECTION */
+.top-section {
+  max-width: 500px;
+}
+
+/* TITLE */
+.title {
+
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 100px;
+  letter-spacing: 20px;
+  text-shadow: 0 4px 20px rgba(0,0,0,0.8);
+}
+
+/* DESCRIPTION */
+.description {
+  font-size: 17px;
+  line-height: 1.6;
+  margin-bottom: 30px;
+  font-weight: 300;
+  margin-top: 30px;
+  display: flex;
+  align-items: center;
+  
+}
+
+/* RATINGS */
+.ratings {
+  margin-top: 10px;
+  display: block;
+  margin-top: 70px;
+}
+
+.avg-rating {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.user-rating {
+  display: block;
+  margin-bottom: 50px;
+}
+
+.star {
+  font-size: 28px;
+  cursor: pointer;
+  color: gray;
+  margin-right: 6px;
+  transition: 0.2s;
+}
+
+.star:hover {
+  transform: scale(1.2);
+}
+
+.star.active {
+  color: gold;
+}
+
+/* BUTTONS */
+.buttons {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 40px;
+  flex-wrap: wrap;
+  justify-content: space-evenly;
+}
+.title-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-evenly;
+  margin-top: 50px;
+  
+}
+.sub-title {
+  font-family: 'italics';
+  font-size: 18px;
+  font-style: italic;
+  letter-spacing: 5px;
+  margin-bottom: 20px;
+  margin-top: 10px;
+  text-shadow: 0 4px 20px rgba(0,0,0,0.8);
+  text-decoration: overline;
+}
+
+.btn {
+  padding: 14px 24px;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  border-radius: 5px;
+  font-weight: 600;
+  transition: 0.3s;
+}
+
+.trailer {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.buy {
+  background: #e50914;
+  color: white;
+}
+
+.btn:hover {
+  opacity: 0.85;
+  transform: translateY(-2px);
+}
+
+/* 🎬 MODAL (FIXED FOR TRAILER) */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.95);
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  z-index: 9999; /* 🔥 IMPORTANT */
+}
+
+.modal-content {
+  width: 85%;
+  max-width: 900px;
+}
+
+.close {
+  color: white;
+  font-size: 30px;
+  cursor: pointer;
+  float: right;
+  margin-bottom: 10px;
+}
+
+/* 📱 MOBILE */
+@media (max-width: 768px) {
+
+  .hero {
+    min-height: auto;
+  }
+
+  .hero-bg {
+    position: relative;
+    height: 50vh;
+  }
+
+  .hero-content {
+    position: relative;
+    width: 100%;
+    height: auto;
+    padding: 20px;
+  }
+
+  .title {
+    font-size: 40px;
+  }
+
+  .description {
+    font-size: 14px;
+  }
+
+  .top-section {
+    max-width: 100%;
+  }
+
+  .buttons {
+    flex-direction: column;
+    margin-top: 20px;
+  }
+
+  .btn {
+    width: 100%;
+  }
+}
