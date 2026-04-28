@@ -8,6 +8,8 @@ def get_access_token():
     url = "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials"
 
     response = requests.get(url, auth=(CONSUMER_KEY, CONSUMER_SECRET))
+    print("TOKEN STATUS:", response.status_code)  # add this
+    print("TOKEN BODY:", response.text)
     return response.json()['access_token']
 
 
@@ -33,7 +35,7 @@ def stk_push(phone):
         "Password": password,
         "Timestamp": timestamp,
         "TransactionType": "CustomerPayBillOnline",
-        "Amount": 100,
+        "Amount": 2,
         "PartyA": phone,
         "PartyB": BUSINESS_SHORT_CODE,
         "PhoneNumber": phone,

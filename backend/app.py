@@ -1,87 +1,239 @@
+# app.py
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from datetime import datetime, timedelta
+import random
+import string
+import json
 import sqlite3
-from datetime import datetime
-import random, string
+import os
+
+from mpesa import stk_push
+from models import session, Ticket, init_db
 
 app = Flask(__name__)
-CORS(app)
+# NEW
+CORS(app, resources={r"/*": {"origins": "*", "allow_headers": ["Content-Type", "x-admin-password"]}})
 
-# -------------------------------
-# DATABASE SETUP (SQLite)
-# -------------------------------
-def init_db():
+# -----------------------------------
+# DATABASE INIT
+# -----------------------------------
+
+init_db()
+
+def init_ratings_table():
     conn = sqlite3.connect("database.db")
     c = conn.cursor()
 
-    # comments
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS comments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            text TEXT
-        )
-    """)
-
-    # ratings (with device tracking)
     c.execute("""
         CREATE TABLE IF NOT EXISTS ratings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             rating INTEGER,
-            device TEXT
+            token TEXT UNIQUE
         )
     """)
 
     conn.commit()
     conn.close()
 
-init_db()
+init_ratings_table()
 
-# -------------------------------
-# TOKEN STORAGE (temporary)
-# -------------------------------
-valid_tokens = {}
+# -----------------------------------
+# SETTINGS
+# -----------------------------------
+
+RELEASE_DATE = datetime(2026, 1, 1, 0, 0, 0)
+TICKET_PRICE = 100  # KES — update if price changes
+
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin1234")  # set in .env
 
 def generate_token():
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    return ''.join(
+        random.choices(
+            string.ascii_letters + string.digits,
+            k=24
+        )
+    )
 
-# 🎬 RELEASE DATE
-RELEASE_DATE = datetime(2026, 5, 5, 0, 0, 0)
+# -----------------------------------
+# 🔐 ADMIN AUTH HELPER
+# -----------------------------------
 
-# -------------------------------
-# 🔐 DEVICE IDENTIFIER (simple)
-# -------------------------------
-def get_device():
-    ip = request.remote_addr
-    ua = request.headers.get("User-Agent")
-    return f"{ip}-{ua}"
+def admin_auth():
+    """Returns True if the request has the correct admin password header."""
+    return request.headers.get("x-admin-password") == ADMIN_PASSWORD
 
-# -------------------------------
-# 💰 MOCK PAYMENT
-# -------------------------------
-@app.route('/pay', methods=['POST'])
+
+# -----------------------------------
+# 💰 START PAYMENT (STK PUSH)
+# -----------------------------------
+
+@app.route("/pay", methods=["POST"])
 def pay():
-    phone = request.json.get("phone")
+    try:
+        phone = request.json.get("phone")
 
-    token = generate_token()
+        if not phone:
+            return jsonify({
+                "error": "Phone number is required"
+            }), 400
 
-    valid_tokens[token] = {
-        "phone": phone
-    }
+        response = stk_push(phone)
+        print("STK RESPONSE:", response)
 
-    return jsonify({
-        "token": token
-    })
+        if response.get("ResponseCode") != "0":
+            return jsonify({
+                "error": response.get("errorMessage", "STK Push failed")
+            }), 400
 
-# -------------------------------
-# 🎬 VIDEO ACCESS + COUNTDOWN
-# -------------------------------
-@app.route('/get-video')
+        checkout_id = response.get("CheckoutRequestID")
+
+        existing = session.query(Ticket).filter_by(
+            checkout_id=checkout_id
+        ).first()
+
+        if not existing:
+            pending_ticket = Ticket(
+                token=None,
+                phone=phone,
+                checkout_id=checkout_id,
+                payment_status="pending",
+                paid=False,
+                mpesa_receipt=None,
+                expires_at=datetime.now() + timedelta(days=30)
+            )
+
+            session.add(pending_ticket)
+            session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "STK Push sent successfully",
+            "checkout_id": checkout_id
+        })
+
+    except Exception as e:
+        print("PAY ERROR:", str(e))
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+# -----------------------------------
+# 🔁 MPESA CALLBACK
+# -----------------------------------
+
+@app.route("/callback", methods=["POST"])
+def callback():
+    try:
+        data = request.get_json(force=True)
+
+        print("CALLBACK DATA:")
+        print(json.dumps(data, indent=2))
+
+        result = data["Body"]["stkCallback"]
+
+        checkout_id = result.get("CheckoutRequestID")
+        result_code = result.get("ResultCode")
+
+        ticket = session.query(Ticket).filter_by(
+            checkout_id=checkout_id
+        ).first()
+
+        if not ticket:
+            print("⚠️ Ticket not found")
+            return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
+
+        if ticket.payment_status == "paid":
+            print("⚠️ Payment already processed")
+            return jsonify({"ResultCode": 0, "ResultDesc": "Already processed"}), 200
+
+        if result_code != 0:
+            ticket.payment_status = "failed"
+            ticket.paid = False
+            session.commit()
+            print("❌ Payment failed")
+            return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
+
+        metadata = result.get("CallbackMetadata", {}).get("Item", [])
+
+        receipt = None
+        amount = None
+
+        for item in metadata:
+            if item.get("Name") == "MpesaReceiptNumber":
+                receipt = item.get("Value")
+            if item.get("Name") == "Amount":
+                amount = item.get("Value")
+
+        token = generate_token()
+
+        ticket.token = token
+        ticket.payment_status = "paid"
+        ticket.paid = True
+        ticket.mpesa_receipt = receipt
+
+        session.commit()
+
+        print("✅ PAYMENT VERIFIED")
+        print("🎟 TOKEN:", token)
+        print("📄 RECEIPT:", receipt)
+        print("💰 AMOUNT:", amount)
+
+        return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
+
+    except Exception as e:
+        print("CALLBACK ERROR:", str(e))
+        return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
+
+
+# -----------------------------------
+# 🔍 CHECK PAYMENT STATUS
+# -----------------------------------
+
+@app.route("/check-payment-status")
+def check_payment_status():
+    checkout_id = request.args.get("checkout_id")
+
+    if not checkout_id:
+        return jsonify({"error": "checkout_id required"}), 400
+
+    ticket = session.query(Ticket).filter_by(
+        checkout_id=checkout_id
+    ).first()
+
+    if not ticket:
+        return jsonify({"status": "not_found"})
+
+    if ticket.payment_status == "paid":
+        return jsonify({"status": "paid", "token": ticket.token})
+
+    if ticket.payment_status == "failed":
+        return jsonify({"status": "failed"})
+
+    return jsonify({"status": "pending"})
+
+
+# -----------------------------------
+# 🎬 VIDEO ACCESS
+# -----------------------------------
+
+@app.route("/get-video")
 def get_video():
     token = request.args.get("token")
 
-    if token not in valid_tokens:
-        return jsonify({"error": "Invalid token"}), 403
+    if not token:
+        return jsonify({"error": "Token required"}), 400
+
+    ticket = session.query(Ticket).filter_by(token=token).first()
+
+    if not ticket:
+        return jsonify({"error": "Invalid ticket"}), 403
+
+    if not ticket.paid:
+        return jsonify({"error": "Payment not completed"}), 403
 
     now = datetime.now()
 
@@ -96,113 +248,213 @@ def get_video():
         "video_url": "https://russellmisarable.s3.eu-north-1.amazonaws.com/index.m3u8"
     })
 
-# -------------------------------
-# 💬 ADD COMMENT
-# -------------------------------
-@app.route('/comment', methods=['POST'])
-def comment():
-    name = request.json.get("name")
-    text = request.json.get("text")
 
-    if not name or not text:
-        return jsonify({"error": "Missing fields"}), 400
+# -----------------------------------
+# ⭐ RATE MOVIE
+# -----------------------------------
 
-    conn = sqlite3.connect("database.db")
-    c = conn.cursor()
-
-    c.execute("INSERT INTO comments (name, text) VALUES (?, ?)", (name, text))
-
-    conn.commit()
-    conn.close()
-
-    return jsonify({"status": "ok"})
-
-# -------------------------------
-# 💬 GET COMMENTS
-# -------------------------------
-@app.route('/comments')
-def get_comments():
-    conn = sqlite3.connect("database.db")
-    c = conn.cursor()
-
-    c.execute("SELECT name, text FROM comments ORDER BY id DESC")
-    data = c.fetchall()
-
-    conn.close()
-
-    return jsonify(data)
-
-# -------------------------------
-# ⭐ RATE FILM (NO BUTTON FLOW)
-# -------------------------------
-@app.route('/rate', methods=['POST'])
+@app.route("/rate", methods=["POST"])
 def rate():
+    token = request.json.get("token")
     rating = request.json.get("rating")
 
-    # ✅ Validate rating
-    if not rating or not (1 <= int(rating) <= 5):
-        return jsonify({"error": "Invalid rating"}), 400
+    if not token:
+        return jsonify({"error": "Buy a ticket first"}), 403
 
-    device = get_device()
+    if not rating:
+        return jsonify({"error": "Rating required"}), 400
+
+    ticket = session.query(Ticket).filter_by(token=token).first()
+
+    if not ticket:
+        return jsonify({"error": "Invalid ticket"}), 403
 
     conn = sqlite3.connect("database.db")
     c = conn.cursor()
 
-    # 🚫 Prevent duplicate rating per device
-    c.execute("SELECT * FROM ratings WHERE device=?", (device,))
+    c.execute("SELECT * FROM ratings WHERE token = ?", (token,))
     existing = c.fetchone()
 
     if existing:
         conn.close()
-        return jsonify({"error": "You already rated"}), 403
+        return jsonify({"error": "You already rated this movie"})
 
-    # ✅ Insert rating
-    c.execute(
-        "INSERT INTO ratings (rating, device) VALUES (?, ?)",
-        (rating, device)
-    )
-
+    c.execute("INSERT INTO ratings (rating, token) VALUES (?, ?)", (rating, token))
     conn.commit()
 
-    # 📊 Return updated stats immediately
     c.execute("SELECT rating FROM ratings")
-    ratings = [r[0] for r in c.fetchall()]
-
+    rows = c.fetchall()
     conn.close()
 
+    ratings = [r[0] for r in rows]
     avg = round(sum(ratings) / len(ratings), 1)
 
-    return jsonify({
-        "status": "ok",
-        "avg": avg,
-        "count": len(ratings)
-    })
+    return jsonify({"success": True, "avg": avg, "count": len(ratings)})
 
-# -------------------------------
+
+# -----------------------------------
 # 📊 GET RATINGS
-# -------------------------------
-@app.route('/ratings')
+# -----------------------------------
+
+@app.route("/ratings")
 def get_ratings():
     conn = sqlite3.connect("database.db")
     c = conn.cursor()
-
     c.execute("SELECT rating FROM ratings")
-    data = [r[0] for r in c.fetchall()]
-
+    rows = c.fetchall()
     conn.close()
 
-    if len(data) == 0:
+    if not rows:
         return jsonify({"avg": 0, "count": 0})
 
-    avg = round(sum(data) / len(data), 1)
+    ratings = [r[0] for r in rows]
+    avg = round(sum(ratings) / len(ratings), 1)
+
+    return jsonify({"avg": avg, "count": len(ratings)})
+
+
+# -----------------------------------
+# 🔐 ADMIN — STATS
+# -----------------------------------
+
+@app.route("/admin/stats")
+def admin_stats():
+    if not admin_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    paid = session.query(Ticket).filter_by(payment_status="paid").count()
+    pending = session.query(Ticket).filter_by(payment_status="pending").count()
+    failed = session.query(Ticket).filter_by(payment_status="failed").count()
+    revenue = paid * TICKET_PRICE
+
+    conn = sqlite3.connect("database.db")
+    c = conn.cursor()
+    c.execute("SELECT rating FROM ratings")
+    rows = c.fetchall()
+    conn.close()
+
+    ratings = [r[0] for r in rows]
+    avg_rating = round(sum(ratings) / len(ratings), 1) if ratings else 0
 
     return jsonify({
-        "avg": avg,
-        "count": len(data)
+        "paid": paid,
+        "pending": pending,
+        "failed": failed,
+        "revenue": revenue,
+        "avg_rating": avg_rating,
+        "rating_count": len(ratings)
     })
 
-# -------------------------------
-# 🚀 RUN SERVER
-# -------------------------------
+
+# -----------------------------------
+# 🔐 ADMIN — ALL TICKETS
+# -----------------------------------
+
+@app.route("/admin/tickets")
+def admin_tickets():
+    if not admin_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    tickets = session.query(Ticket).order_by(Ticket.created_at.desc()).all()
+
+    return jsonify([
+        {
+            "id": t.id,
+            "phone": t.phone,
+            "payment_status": t.payment_status,
+            "mpesa_receipt": t.mpesa_receipt,
+            "token": t.token,
+            "checkout_id": t.checkout_id,
+            "paid": t.paid,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "expires_at": t.expires_at.isoformat() if t.expires_at else None,
+        }
+        for t in tickets
+    ])
+
+
+# -----------------------------------
+# 🔐 ADMIN — RATINGS BREAKDOWN
+# -----------------------------------
+
+@app.route("/admin/ratings-breakdown")
+def admin_ratings_breakdown():
+    if not admin_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    conn = sqlite3.connect("database.db")
+    c = conn.cursor()
+    c.execute("SELECT rating FROM ratings")
+    rows = c.fetchall()
+    conn.close()
+
+    breakdown = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for (r,) in rows:
+        if r in breakdown:
+            breakdown[r] += 1
+
+    return jsonify(breakdown)
+
+
+# -----------------------------------
+# 🔐 ADMIN — MARK TICKET PAID MANUALLY
+# -----------------------------------
+
+@app.route("/admin/mark-paid", methods=["POST"])
+def admin_mark_paid():
+    if not admin_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    checkout_id = request.json.get("checkout_id")
+
+    ticket = session.query(Ticket).filter_by(checkout_id=checkout_id).first()
+
+    if not ticket:
+        return jsonify({"error": "Ticket not found"}), 404
+
+    if ticket.payment_status == "paid":
+        return jsonify({"error": "Already paid"})
+
+    token = generate_token()
+    ticket.token = token
+    ticket.payment_status = "paid"
+    ticket.paid = True
+    session.commit()
+
+    print(f"✅ ADMIN manually marked ticket {checkout_id} as paid. Token: {token}")
+
+    return jsonify({"success": True, "token": token})
+
+
+# -----------------------------------
+# 🔐 ADMIN — REVOKE TOKEN
+# -----------------------------------
+
+@app.route("/admin/revoke", methods=["POST"])
+def admin_revoke():
+    if not admin_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    checkout_id = request.json.get("checkout_id")
+
+    ticket = session.query(Ticket).filter_by(checkout_id=checkout_id).first()
+
+    if not ticket:
+        return jsonify({"error": "Ticket not found"}), 404
+
+    ticket.token = None
+    ticket.payment_status = "failed"
+    ticket.paid = False
+    session.commit()
+
+    print(f"🚫 ADMIN revoked ticket {checkout_id}")
+
+    return jsonify({"success": True})
+
+
+# -----------------------------------
+# RUN SERVER
+# -----------------------------------
+
 if __name__ == "__main__":
     app.run(debug=True)
