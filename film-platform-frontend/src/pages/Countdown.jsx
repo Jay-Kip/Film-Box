@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+const RELEASE_DATE = new Date("2026-05-05T00:00:00");
+
 function Countdown() {
   const [timeLeft, setTimeLeft] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
@@ -16,37 +18,34 @@ function Countdown() {
 
       if (data.status === "unlocked") {
         setVideoUrl(data.video_url);
-      } else if (data.status === "locked") {
-        startCountdown(new Date(data.release_date));
       }
     } catch (err) {
       console.error(err);
     }
   };
 
-  // ⏳ COUNTDOWN
-  const startCountdown = (releaseDate) => {
+  // ⏳ COUNTDOWN LOGIC
+  useEffect(() => {
+    fetchVideo();
+
     const interval = setInterval(() => {
-      const diff = new Date(releaseDate) - new Date();
+      const diff = RELEASE_DATE - new Date();
 
       if (diff <= 0) {
         clearInterval(interval);
-        fetchVideo(); // 🔥 auto unlock
+        fetchVideo();
         return;
       }
 
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
       const minutes = Math.floor((diff / (1000 * 60)) % 60);
+      const seconds = Math.floor((diff / 1000) % 60);
 
-      setTimeLeft(`${days}d ${hours}h ${minutes}m`);
+      setTimeLeft(`${days}d ${hours}h ${minutes}m ${seconds}s`);
     }, 1000);
 
     return () => clearInterval(interval);
-  };
-
-  useEffect(() => {
-    fetchVideo();
   }, []);
 
   return (
@@ -61,6 +60,9 @@ function Countdown() {
         flexDirection: "column",
         textAlign: "center",
         padding: "20px",
+        width: "100%",
+        boxSizing: "border-box",
+        position: "absolute",
       }}
     >
       {/* 🔙 BACK BUTTON */}
@@ -84,20 +86,25 @@ function Countdown() {
       {/* ⏳ BEFORE RELEASE */}
       {!videoUrl && (
         <>
-          <h1 style={{ marginBottom: "10px" }}>Ticket Confirmed ✔</h1>
-          <p style={{ marginBottom: "10px", opacity: 0.7 }}>
-            Full Movie out in:
+          <h1 style={{ marginBottom: "10px" }}>Ticket Confirmed ✅</h1>
+
+          <p style={{ marginBottom: "10px", marginTop: "20px", opacity: 0.7 }}>
+            Full Movie releases in:
           </p>
 
           <h2
             style={{
-              fontSize: "50px",
+              fontSize: "clamp(28px, 8vw, 50px)", // ✅ scales with screen
               letterSpacing: "2px",
               marginTop: "10px",
             }}
           >
             {timeLeft}
           </h2>
+
+          <p style={{ opacity: 0.5, marginTop: "10px" }}>
+            May 5, 2026 • 00:00 UTC
+          </p>
         </>
       )}
 
@@ -106,7 +113,16 @@ function Countdown() {
         <>
           <h2 style={{ marginBottom: "20px" }}>🎬 Now Playing</h2>
 
-          <video width="80%" controls>
+          <video
+            controls
+            autoPlay
+            style={{
+              width: "100%",           // ✅ full width on mobile
+              maxWidth: "960px",       // ✅ capped on desktop
+              aspectRatio: "16 / 9",  // ✅ always correct proportions
+              background: "#000",
+            }}
+          >
             <source src={videoUrl} type="application/x-mpegURL" />
           </video>
         </>

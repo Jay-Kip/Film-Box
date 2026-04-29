@@ -6,37 +6,126 @@ function Home() {
   const [rating, setRating] = useState(0);
   const [avgRating, setAvgRating] = useState(0);
   const [ratingCount, setRatingCount] = useState(0);
+
   const [showTrailer, setShowTrailer] = useState(false);
 
-  const videoRef = useRef(null);
+  // 💰 Payment modal
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [phone, setPhone] = useState("");
+  const [checkingPayment, setCheckingPayment] = useState(false);
 
-  // 🎯 BUY TICKET
+  const videoRef = useRef(null);
+  const pollingRef = useRef(null);
+  const timeoutRef = useRef(null);
+
+  // -----------------------------------
+  // 💰 BUY TICKET (REAL MPESA)
+  // -----------------------------------
   const handlePayment = async () => {
+    if (!phone) {
+      alert("Please enter your M-Pesa number");
+      return;
+    }
+
     try {
       const res = await fetch("http://127.0.0.1:5000/pay", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ phone: "254712345678" }),
+        body: JSON.stringify({
+          phone: phone,
+        }),
       });
 
       const data = await res.json();
+      console.log("PAYMENT RESPONSE:", data);
 
-      if (data.token) {
-        localStorage.setItem("token", data.token);
-        alert("✅ Ticket purchased!");
-        window.location.href = "/countdown";
+      if (data.success) {
+        alert("📲 Check your phone and enter your M-Pesa PIN");
+
+        localStorage.setItem("checkout_id", data.checkout_id);
+
+        setShowPaymentModal(false);
+        setPhone("");
+
+        startPaymentVerification(data.checkout_id);
       } else {
-        alert("Payment failed");
+        alert(data.error || "Payment failed. Please try again.");
       }
     } catch (err) {
       console.error(err);
-      alert("Server error");
+      alert("Server error. Is the backend running?");
     }
   };
 
-  // ⭐ SUBMIT RATING (FIXED)
+  // -----------------------------------
+  // 🔁 CHECK PAYMENT STATUS
+  // -----------------------------------
+  const startPaymentVerification = (checkoutId) => {
+    setCheckingPayment(true);
+
+    // ✅ Stop polling after 2 minutes
+    const timeout = setTimeout(() => {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+      timeoutRef.current = null;
+      setCheckingPayment(false);
+      alert("⏱ Payment confirmation timed out. If you were charged, please contact support.");
+    }, 120000);
+
+    timeoutRef.current = timeout;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:5000/check-payment-status?checkout_id=${checkoutId}`
+        );
+
+        const data = await res.json();
+        console.log("PAYMENT STATUS:", data);
+
+        if (data.status === "paid") {
+          clearInterval(interval);
+          clearTimeout(timeoutRef.current);
+          pollingRef.current = null;
+          timeoutRef.current = null;
+          setCheckingPayment(false);
+
+          localStorage.setItem("token", data.token);
+
+          alert("✅ Payment successful!");
+          window.location.href = "/countdown";
+        }
+
+        if (data.status === "failed") {
+          clearInterval(interval);
+          clearTimeout(timeoutRef.current);
+          pollingRef.current = null;
+          timeoutRef.current = null;
+          setCheckingPayment(false);
+
+          alert("❌ Payment failed or cancelled");
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }, 5000);
+
+    pollingRef.current = interval;
+  };
+
+  // ✅ Clear polling and timeout if user navigates away
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  // -----------------------------------
+  // ⭐ SUBMIT RATING
+  // -----------------------------------
   const submitRating = async (value) => {
     const token = localStorage.getItem("token");
 
@@ -53,7 +142,7 @@ function Home() {
         },
         body: JSON.stringify({
           rating: value,
-          token: token, // ✅ REQUIRED
+          token: token,
         }),
       });
 
@@ -64,21 +153,18 @@ function Home() {
         return;
       }
 
-      // ✅ Save locally so stars stay lit
       localStorage.setItem("user_rating", value);
 
       setRating(value);
-
-      // 🔄 reload average
       loadRatings();
     } catch (err) {
       console.error(err);
     }
   };
 
-const displayRating = rating || Math.round(avgRating);
-
-  // 📊 LOAD RATINGS (FIXED)
+  // -----------------------------------
+  // 📊 LOAD RATINGS
+  // -----------------------------------
   const loadRatings = async () => {
     try {
       const res = await fetch("http://127.0.0.1:5000/ratings");
@@ -91,9 +177,12 @@ const displayRating = rating || Math.round(avgRating);
     }
   };
 
-  // 🔄 LOAD USER RATING (IMPORTANT)
+  // -----------------------------------
+  // 🔄 LOAD SAVED RATING
+  // -----------------------------------
   useEffect(() => {
     const savedRating = localStorage.getItem("user_rating");
+
     if (savedRating) {
       setRating(parseInt(savedRating));
     }
@@ -101,10 +190,15 @@ const displayRating = rating || Math.round(avgRating);
     loadRatings();
   }, []);
 
-  // 🎬 HLS PLAYER
+  const displayRating = rating || Math.round(avgRating);
+
+  // -----------------------------------
+  // 🎬 HLS TRAILER PLAYER
+  // -----------------------------------
   useEffect(() => {
     if (showTrailer && videoRef.current) {
       const video = videoRef.current;
+
       const src =
         "https://russellmisarable.s3.eu-north-1.amazonaws.com/index.m3u8";
 
@@ -112,6 +206,7 @@ const displayRating = rating || Math.round(avgRating);
         video.src = src;
       } else if (Hls.isSupported()) {
         const hls = new Hls();
+
         hls.loadSource(src);
         hls.attachMedia(video);
 
@@ -134,8 +229,9 @@ const displayRating = rating || Math.round(avgRating);
           </div>
 
           <p className="description">
-            After he recieves the news, Russell isolates himself
-            to greif and vows to get revange for the death of his brother.
+            After he receives the news, Russell isolates himself
+            to grieve and vows to get revenge for the death of
+            his brother.
           </p>
 
           {/* ⭐ RATINGS */}
@@ -145,25 +241,22 @@ const displayRating = rating || Math.round(avgRating);
             </span>
 
             <div className="user-rating">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <span
-                    key={star}
-                    className={`star ${star <= displayRating ? "active" : ""}`}
-                    onClick={() => {
-                      setRating(star);
-                      submitRating(star);
-                    }}
-                  >
-                    ★
-                  </span>
-                ))}
-              </div>
-
-
+              {[1, 2, 3, 4, 5].map((star) => (
+                <span
+                  key={star}
+                  className={`star ${
+                    star <= displayRating ? "active" : ""
+                  }`}
+                  onClick={() => submitRating(star)}
+                >
+                  ★
+                </span>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* 🎯 BUTTONS */}
+        {/* BUTTONS */}
         <div className="buttons">
           <button
             className="btn trailer"
@@ -172,15 +265,27 @@ const displayRating = rating || Math.round(avgRating);
             ▶ Watch Trailer
           </button>
 
-          <button className="btn buy" onClick={handlePayment}>
+          <button
+            className="btn buy"
+            onClick={() => setShowPaymentModal(true)}
+          >
             🎟 Buy Ticket
           </button>
         </div>
+
+        {checkingPayment && (
+          <p style={{ marginTop: "20px" }}>
+            ⏳ Waiting for payment confirmation...
+          </p>
+        )}
       </div>
 
       {/* 🎬 TRAILER MODAL */}
       {showTrailer && (
-        <div className="modal" onClick={() => setShowTrailer(false)}>
+        <div
+          className="modal"
+          onClick={() => setShowTrailer(false)}
+        >
           <div
             className="modal-content"
             onClick={(e) => e.stopPropagation()}
@@ -192,7 +297,49 @@ const displayRating = rating || Math.round(avgRating);
               ✖
             </span>
 
-            <video ref={videoRef} controls autoPlay width="100%" />
+            <video
+              ref={videoRef}
+              controls
+              autoPlay
+              width="100%"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 💰 PAYMENT MODAL */}
+      {showPaymentModal && (
+        <div
+          className="modal"
+          onClick={() => setShowPaymentModal(false)}
+        >
+          <div
+            className="modal-content payment-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span
+              className="close"
+              onClick={() => setShowPaymentModal(false)}
+            >
+              ✖
+            </span>
+
+            <h2>Enter M-Pesa Number</h2>
+
+            <input
+              type="text"
+              placeholder="2547XXXXXXXX"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="phone-input"
+            />
+
+            <button
+              className="btn buy"
+              onClick={handlePayment}
+            >
+              Pay KES 100
+            </button>
           </div>
         </div>
       )}
