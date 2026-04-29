@@ -47,13 +47,13 @@ function Admin() {
   setLoading(true);
   try {
     const [ticketsRes, statsRes, ratingsRes] = await Promise.all([
-      fetch("http://127.0.0.1:5000/admin/tickets", {
+      fetch("${import.meta.env.VITE_API_URL}/tickets", {
         headers: { "x-admin-password": ADMIN_PASSWORD },
       }),
-      fetch("http://127.0.0.1:5000/admin/stats", {
+      fetch("${import.meta.env.VITE_API_URL}/admin/stats", {
         headers: { "x-admin-password": ADMIN_PASSWORD },
       }),
-      fetch("http://127.0.0.1:5000/admin/ratings-breakdown", {
+      fetch("${import.meta.env.VITE_API_URL}/admin/ratings-breakdown", {
         headers: { "x-admin-password": ADMIN_PASSWORD },
       }),
     ]);
@@ -91,7 +91,7 @@ function Admin() {
     );
     if (!confirm) return;
 
-    const res = await fetch("http://127.0.0.1:5000/admin/mark-paid", {
+    const res = await fetch("${import.meta.env.VITE_API_URL}/admin/mark-paid", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -115,7 +115,7 @@ function Admin() {
     );
     if (!confirm) return;
 
-    const res = await fetch("http://127.0.0.1:5000/admin/revoke", {
+    const res = await fetch("${import.meta.env.VITE_API_URL}/admin/revoke", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

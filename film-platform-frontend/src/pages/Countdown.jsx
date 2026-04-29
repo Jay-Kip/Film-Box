@@ -11,7 +11,7 @@ function Countdown() {
   const fetchVideo = async () => {
     try {
       const res = await fetch(
-        `http://127.0.0.1:5000/get-video?token=${token}`
+        `${import.meta.env.VITE_API_URL}/get-video?token=${token}`
       );
 
       const data = await res.json();
