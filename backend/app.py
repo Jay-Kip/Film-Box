@@ -14,7 +14,11 @@ from models import session, Ticket, init_db
 
 app = Flask(__name__)
 # NEW
-CORS(app, resources={r"/*": {"origins": "*", "allow_headers": ["Content-Type", "x-admin-password"]}})
+#CORS(app, resources={r"/*": {"origins": "*", "allow_headers": ["Content-Type", "x-admin-password"]}})
+CORS(app, resources={r"/*": {
+    "origins": ["https://film-box-seven.vercel.app"],
+    "allow_headers": ["Content-Type", "x-admin-password"]
+}})
 
 # -----------------------------------
 # DATABASE INIT
