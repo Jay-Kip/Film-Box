@@ -28,7 +28,7 @@ function Home() {
     }
 
     try {
-      const res = await fetch("http://127.0.0.1:5000/pay", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/pay`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -79,7 +79,7 @@ function Home() {
     const interval = setInterval(async () => {
       try {
         const res = await fetch(
-          `http://127.0.0.1:5000/check-payment-status?checkout_id=${checkoutId}`
+          `${import.meta.env.VITE_API_URL}/check-payment-status?checkout_id=${checkoutId}`
         );
 
         const data = await res.json();
@@ -135,7 +135,7 @@ function Home() {
     }
 
     try {
-      const res = await fetch("http://127.0.0.1:5000/rate", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/rate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -167,7 +167,7 @@ function Home() {
   // -----------------------------------
   const loadRatings = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:5000/ratings");
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/ratings`);
       const data = await res.json();
 
       setAvgRating(data.avg || 0);

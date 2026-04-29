@@ -115,7 +115,7 @@ function Admin() {
     );
     if (!confirm) return;
 
-    const res = await fetch("${import.meta.env.VITE_API_URL}/admin/revoke", {
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/admin/revoke`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
