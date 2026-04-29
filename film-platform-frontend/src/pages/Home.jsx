@@ -8,6 +8,7 @@ function Home() {
   const [ratingCount, setRatingCount] = useState(0);
 
   const [showTrailer, setShowTrailer] = useState(false);
+  const [hasTicket, setHasTicket] = useState(false); // ✅ track if user already has ticket
 
   // 💰 Payment modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -65,7 +66,7 @@ function Home() {
   const startPaymentVerification = (checkoutId) => {
     setCheckingPayment(true);
 
-    // ✅ Stop polling after 2 minutes
+    // Stop polling after 2 minutes
     const timeout = setTimeout(() => {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
@@ -93,7 +94,7 @@ function Home() {
           setCheckingPayment(false);
 
           localStorage.setItem("token", data.token);
-
+          setHasTicket(true); // ✅ switch button immediately after payment
           alert("✅ Payment successful!");
           window.location.href = "/countdown";
         }
@@ -178,14 +179,15 @@ function Home() {
   };
 
   // -----------------------------------
-  // 🔄 LOAD SAVED RATING
+  // 🔄 LOAD SAVED RATING + CHECK TICKET
   // -----------------------------------
   useEffect(() => {
     const savedRating = localStorage.getItem("user_rating");
+    if (savedRating) setRating(parseInt(savedRating));
 
-    if (savedRating) {
-      setRating(parseInt(savedRating));
-    }
+    // ✅ check if user already has a ticket from a previous session
+    const token = localStorage.getItem("token");
+    if (token) setHasTicket(true);
 
     loadRatings();
   }, []);
@@ -265,12 +267,22 @@ function Home() {
             ▶ Watch Trailer
           </button>
 
-          <button
-            className="btn buy"
-            onClick={() => setShowPaymentModal(true)}
-          >
-            🎟 Buy Ticket
-          </button>
+          {/* ✅ Show Watch Movie if ticket exists, Buy Ticket if not */}
+          {hasTicket ? (
+            <button
+              className="btn buy"
+              onClick={() => window.location.href = "/countdown"}
+            >
+              🎬 Watch Movie
+            </button>
+          ) : (
+            <button
+              className="btn buy"
+              onClick={() => setShowPaymentModal(true)}
+            >
+              🎟 Buy Ticket
+            </button>
+          )}
         </div>
 
         {checkingPayment && (
