@@ -6,17 +6,18 @@ from datetime import datetime, timedelta
 import random
 import string
 import json
-import sqlite3
 import os
 
 from mpesa import stk_push
-from models import session, Ticket, init_db
+from models import session, Ticket, Rating, init_db
 
 app = Flask(__name__)
-# NEW
-#CORS(app, resources={r"/*": {"origins": "*", "allow_headers": ["Content-Type", "x-admin-password"]}})
 CORS(app, resources={r"/*": {
-    "origins": ["https://film-box-seven.vercel.app"],
+    "origins": [
+        "https://film-box-seven.vercel.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
     "allow_headers": ["Content-Type", "x-admin-password"]
 }})
 
@@ -26,62 +27,43 @@ CORS(app, resources={r"/*": {
 
 init_db()
 
-def init_ratings_table():
-    conn = sqlite3.connect("database.db")
-    c = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS ratings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            rating INTEGER,
-            token TEXT UNIQUE
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-init_ratings_table()
-
 # -----------------------------------
 # SETTINGS
 # -----------------------------------
 
-RELEASE_DATE = datetime(2026, 1, 1, 0, 0, 0)
-TICKET_PRICE = 100  # KES — update if price changes
+RELEASE_DATE = datetime(2026, 5, 5, 0, 0, 0)
+TICKET_PRICE = 100  # KES
 
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin1234")  # set in .env
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin1234")
+
 
 def generate_token():
     return ''.join(
-        random.choices(
-            string.ascii_letters + string.digits,
-            k=24
-        )
+        random.choices(string.ascii_letters + string.digits, k=24)
     )
+
 
 # -----------------------------------
 # 🔐 ADMIN AUTH HELPER
 # -----------------------------------
 
 def admin_auth():
-    """Returns True if the request has the correct admin password header."""
     return request.headers.get("x-admin-password") == ADMIN_PASSWORD
 
 
 # -----------------------------------
 # 💰 START PAYMENT (STK PUSH)
+# ✅ saves device_id from fingerprint
 # -----------------------------------
 
 @app.route("/pay", methods=["POST"])
 def pay():
     try:
         phone = request.json.get("phone")
+        device_id = request.json.get("device_id")  # ✅ receive fingerprint
 
         if not phone:
-            return jsonify({
-                "error": "Phone number is required"
-            }), 400
+            return jsonify({"error": "Phone number is required"}), 400
 
         response = stk_push(phone)
         print("STK RESPONSE:", response)
@@ -105,9 +87,9 @@ def pay():
                 payment_status="pending",
                 paid=False,
                 mpesa_receipt=None,
+                device_id=device_id,  # ✅ store fingerprint on ticket
                 expires_at=datetime.now() + timedelta(days=30)
             )
-
             session.add(pending_ticket)
             session.commit()
 
@@ -119,10 +101,7 @@ def pay():
 
     except Exception as e:
         print("PAY ERROR:", str(e))
-
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 
 # -----------------------------------
@@ -138,7 +117,6 @@ def callback():
         print(json.dumps(data, indent=2))
 
         result = data["Body"]["stkCallback"]
-
         checkout_id = result.get("CheckoutRequestID")
         result_code = result.get("ResultCode")
 
@@ -162,7 +140,6 @@ def callback():
             return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
 
         metadata = result.get("CallbackMetadata", {}).get("Item", [])
-
         receipt = None
         amount = None
 
@@ -173,12 +150,10 @@ def callback():
                 amount = item.get("Value")
 
         token = generate_token()
-
         ticket.token = token
         ticket.payment_status = "paid"
         ticket.paid = True
         ticket.mpesa_receipt = receipt
-
         session.commit()
 
         print("✅ PAYMENT VERIFIED")
@@ -222,11 +197,13 @@ def check_payment_status():
 
 # -----------------------------------
 # 🎬 VIDEO ACCESS
+# ✅ verifies device_id matches the one that paid
 # -----------------------------------
 
 @app.route("/get-video")
 def get_video():
     token = request.args.get("token")
+    device_id = request.args.get("device_id")  # ✅ receive fingerprint
 
     if not token:
         return jsonify({"error": "Token required"}), 400
@@ -238,6 +215,11 @@ def get_video():
 
     if not ticket.paid:
         return jsonify({"error": "Payment not completed"}), 403
+
+    # ✅ verify device matches — only if a device_id was stored
+    if ticket.device_id and device_id != ticket.device_id:
+        print(f"🚫 Device mismatch. Expected: {ticket.device_id}, Got: {device_id}")
+        return jsonify({"error": "Device not authorized"}), 403
 
     now = datetime.now()
 
@@ -260,12 +242,12 @@ def get_video():
 @app.route("/rate", methods=["POST"])
 def rate():
     token = request.json.get("token")
-    rating = request.json.get("rating")
+    rating_value = request.json.get("rating")
 
     if not token:
         return jsonify({"error": "Buy a ticket first"}), 403
 
-    if not rating:
+    if not rating_value:
         return jsonify({"error": "Rating required"}), 400
 
     ticket = session.query(Ticket).filter_by(token=token).first()
@@ -273,27 +255,20 @@ def rate():
     if not ticket:
         return jsonify({"error": "Invalid ticket"}), 403
 
-    conn = sqlite3.connect("database.db")
-    c = conn.cursor()
-
-    c.execute("SELECT * FROM ratings WHERE token = ?", (token,))
-    existing = c.fetchone()
+    existing = session.query(Rating).filter_by(token=token).first()
 
     if existing:
-        conn.close()
         return jsonify({"error": "You already rated this movie"})
 
-    c.execute("INSERT INTO ratings (rating, token) VALUES (?, ?)", (rating, token))
-    conn.commit()
+    new_rating = Rating(rating=rating_value, token=token)
+    session.add(new_rating)
+    session.commit()
 
-    c.execute("SELECT rating FROM ratings")
-    rows = c.fetchall()
-    conn.close()
+    all_ratings = session.query(Rating).all()
+    values = [r.rating for r in all_ratings]
+    avg = round(sum(values) / len(values), 1)
 
-    ratings = [r[0] for r in rows]
-    avg = round(sum(ratings) / len(ratings), 1)
-
-    return jsonify({"success": True, "avg": avg, "count": len(ratings)})
+    return jsonify({"success": True, "avg": avg, "count": len(values)})
 
 
 # -----------------------------------
@@ -302,19 +277,15 @@ def rate():
 
 @app.route("/ratings")
 def get_ratings():
-    conn = sqlite3.connect("database.db")
-    c = conn.cursor()
-    c.execute("SELECT rating FROM ratings")
-    rows = c.fetchall()
-    conn.close()
+    all_ratings = session.query(Rating).all()
 
-    if not rows:
+    if not all_ratings:
         return jsonify({"avg": 0, "count": 0})
 
-    ratings = [r[0] for r in rows]
-    avg = round(sum(ratings) / len(ratings), 1)
+    values = [r.rating for r in all_ratings]
+    avg = round(sum(values) / len(values), 1)
 
-    return jsonify({"avg": avg, "count": len(ratings)})
+    return jsonify({"avg": avg, "count": len(values)})
 
 
 # -----------------------------------
@@ -331,14 +302,9 @@ def admin_stats():
     failed = session.query(Ticket).filter_by(payment_status="failed").count()
     revenue = paid * TICKET_PRICE
 
-    conn = sqlite3.connect("database.db")
-    c = conn.cursor()
-    c.execute("SELECT rating FROM ratings")
-    rows = c.fetchall()
-    conn.close()
-
-    ratings = [r[0] for r in rows]
-    avg_rating = round(sum(ratings) / len(ratings), 1) if ratings else 0
+    all_ratings = session.query(Rating).all()
+    values = [r.rating for r in all_ratings]
+    avg_rating = round(sum(values) / len(values), 1) if values else 0
 
     return jsonify({
         "paid": paid,
@@ -346,7 +312,7 @@ def admin_stats():
         "failed": failed,
         "revenue": revenue,
         "avg_rating": avg_rating,
-        "rating_count": len(ratings)
+        "rating_count": len(values)
     })
 
 
@@ -386,16 +352,12 @@ def admin_ratings_breakdown():
     if not admin_auth():
         return jsonify({"error": "Unauthorized"}), 401
 
-    conn = sqlite3.connect("database.db")
-    c = conn.cursor()
-    c.execute("SELECT rating FROM ratings")
-    rows = c.fetchall()
-    conn.close()
-
+    all_ratings = session.query(Rating).all()
     breakdown = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-    for (r,) in rows:
-        if r in breakdown:
-            breakdown[r] += 1
+
+    for r in all_ratings:
+        if r.rating in breakdown:
+            breakdown[r.rating] += 1
 
     return jsonify(breakdown)
 
@@ -410,7 +372,6 @@ def admin_mark_paid():
         return jsonify({"error": "Unauthorized"}), 401
 
     checkout_id = request.json.get("checkout_id")
-
     ticket = session.query(Ticket).filter_by(checkout_id=checkout_id).first()
 
     if not ticket:
@@ -440,7 +401,6 @@ def admin_revoke():
         return jsonify({"error": "Unauthorized"}), 401
 
     checkout_id = request.json.get("checkout_id")
-
     ticket = session.query(Ticket).filter_by(checkout_id=checkout_id).first()
 
     if not ticket:

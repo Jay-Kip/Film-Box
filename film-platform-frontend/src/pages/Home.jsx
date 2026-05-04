@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import Hls from "hls.js";
+import FingerprintJS from "@fingerprintjs/fingerprintjs";
 import "../styles/home.css";
 
 function Home() {
@@ -8,7 +9,7 @@ function Home() {
   const [ratingCount, setRatingCount] = useState(0);
 
   const [showTrailer, setShowTrailer] = useState(false);
-  const [hasTicket, setHasTicket] = useState(false); // ✅ track if user already has ticket
+  const [hasTicket, setHasTicket] = useState(false);
 
   // 💰 Payment modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -18,6 +19,35 @@ function Home() {
   const videoRef = useRef(null);
   const pollingRef = useRef(null);
   const timeoutRef = useRef(null);
+  const deviceIdRef = useRef(null); // ✅ store fingerprint in ref
+
+  // -----------------------------------
+  // 🔑 GENERATE DEVICE FINGERPRINT
+  // -----------------------------------
+  useEffect(() => {
+    const generateFingerprint = async () => {
+      // use cached fingerprint if already generated this session
+      const cached = localStorage.getItem("device_id");
+
+      if (cached) {
+        deviceIdRef.current = cached;
+        return;
+      }
+
+      try {
+        const fp = await FingerprintJS.load();
+        const result = await fp.get();
+        const visitorId = result.visitorId;
+
+        localStorage.setItem("device_id", visitorId);
+        deviceIdRef.current = visitorId;
+      } catch (err) {
+        console.error("Fingerprint error:", err);
+      }
+    };
+
+    generateFingerprint();
+  }, []);
 
   // -----------------------------------
   // 💰 BUY TICKET (REAL MPESA)
@@ -36,6 +66,7 @@ function Home() {
         },
         body: JSON.stringify({
           phone: phone,
+          device_id: deviceIdRef.current, // ✅ send fingerprint with payment
         }),
       });
 
@@ -66,7 +97,6 @@ function Home() {
   const startPaymentVerification = (checkoutId) => {
     setCheckingPayment(true);
 
-    // Stop polling after 2 minutes
     const timeout = setTimeout(() => {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
@@ -94,7 +124,7 @@ function Home() {
           setCheckingPayment(false);
 
           localStorage.setItem("token", data.token);
-          setHasTicket(true); // ✅ switch button immediately after payment
+          setHasTicket(true); // ✅ switch button to Watch Movie
           alert("✅ Payment successful!");
           window.location.href = "/countdown";
         }
@@ -155,7 +185,6 @@ function Home() {
       }
 
       localStorage.setItem("user_rating", value);
-
       setRating(value);
       loadRatings();
     } catch (err) {
@@ -185,7 +214,7 @@ function Home() {
     const savedRating = localStorage.getItem("user_rating");
     if (savedRating) setRating(parseInt(savedRating));
 
-    // ✅ check if user already has a ticket from a previous session
+    // ✅ if token exists in localStorage, user already has a ticket
     const token = localStorage.getItem("token");
     if (token) setHasTicket(true);
 
@@ -208,10 +237,8 @@ function Home() {
         video.src = src;
       } else if (Hls.isSupported()) {
         const hls = new Hls();
-
         hls.loadSource(src);
         hls.attachMedia(video);
-
         return () => hls.destroy();
       }
     }
@@ -246,9 +273,7 @@ function Home() {
               {[1, 2, 3, 4, 5].map((star) => (
                 <span
                   key={star}
-                  className={`star ${
-                    star <= displayRating ? "active" : ""
-                  }`}
+                  className={`star ${star <= displayRating ? "active" : ""}`}
                   onClick={() => submitRating(star)}
                 >
                   ★
@@ -267,11 +292,11 @@ function Home() {
             ▶ Watch Trailer
           </button>
 
-          {/* ✅ Show Watch Movie if ticket exists, Buy Ticket if not */}
+          {/* ✅ Watch Movie if ticket exists, Buy Ticket if not */}
           {hasTicket ? (
             <button
               className="btn buy"
-              onClick={() => window.location.href = "/countdown"}
+              onClick={() => (window.location.href = "/countdown")}
             >
               🎬 Watch Movie
             </button>
@@ -294,37 +319,22 @@ function Home() {
 
       {/* 🎬 TRAILER MODAL */}
       {showTrailer && (
-        <div
-          className="modal"
-          onClick={() => setShowTrailer(false)}
-        >
+        <div className="modal" onClick={() => setShowTrailer(false)}>
           <div
             className="modal-content"
             onClick={(e) => e.stopPropagation()}
           >
-            <span
-              className="close"
-              onClick={() => setShowTrailer(false)}
-            >
+            <span className="close" onClick={() => setShowTrailer(false)}>
               ✖
             </span>
-
-            <video
-              ref={videoRef}
-              controls
-              autoPlay
-              width="100%"
-            />
+            <video ref={videoRef} controls autoPlay width="100%" />
           </div>
         </div>
       )}
 
       {/* 💰 PAYMENT MODAL */}
       {showPaymentModal && (
-        <div
-          className="modal"
-          onClick={() => setShowPaymentModal(false)}
-        >
+        <div className="modal" onClick={() => setShowPaymentModal(false)}>
           <div
             className="modal-content payment-modal"
             onClick={(e) => e.stopPropagation()}
@@ -346,10 +356,7 @@ function Home() {
               className="phone-input"
             />
 
-            <button
-              className="btn buy"
-              onClick={handlePayment}
-            >
+            <button className="btn buy" onClick={handlePayment}>
               Pay KES 100
             </button>
           </div>

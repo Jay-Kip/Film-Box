@@ -5,19 +5,27 @@ const RELEASE_DATE = new Date("2026-05-05T00:00:00");
 function Countdown() {
   const [timeLeft, setTimeLeft] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
+  const [accessDenied, setAccessDenied] = useState(false);
+
   const token = localStorage.getItem("token");
+  const deviceId = localStorage.getItem("device_id"); // ✅ read fingerprint
 
   // 🎬 FETCH VIDEO STATUS
   const fetchVideo = async () => {
     try {
       const res = await fetch(
-        `${import.meta.env.VITE_API_URL}/get-video?token=${token}`
+        `${import.meta.env.VITE_API_URL}/get-video?token=${token}&device_id=${deviceId}`
       );
 
       const data = await res.json();
 
       if (data.status === "unlocked") {
         setVideoUrl(data.video_url);
+      }
+
+      // ✅ handle wrong device
+      if (res.status === 403 && data.error === "Device not authorized") {
+        setAccessDenied(true);
       }
     } catch (err) {
       console.error(err);
@@ -26,6 +34,11 @@ function Countdown() {
 
   // ⏳ COUNTDOWN LOGIC
   useEffect(() => {
+    if (!token) {
+      window.location.href = "/"; // no token — send back home
+      return;
+    }
+
     fetchVideo();
 
     const interval = setInterval(() => {
@@ -47,6 +60,47 @@ function Countdown() {
 
     return () => clearInterval(interval);
   }, []);
+
+  // ✅ Wrong device screen
+  if (accessDenied) {
+    return (
+      <div
+        style={{
+          backgroundColor: "#000",
+          color: "white",
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          flexDirection: "column",
+          textAlign: "center",
+          padding: "20px",
+        }}
+      >
+        <h1 style={{ fontSize: "40px", marginBottom: "16px" }}>🚫</h1>
+        <h2>Access Denied</h2>
+        <p style={{ opacity: 0.6, marginTop: "12px", maxWidth: "360px" }}>
+          This ticket is linked to a different device. If you believe this is
+          an error, please contact support.
+        </p>
+        <button
+          style={{
+            marginTop: "30px",
+            padding: "10px 20px",
+            background: "#e50914",
+            color: "white",
+            border: "none",
+            borderRadius: "6px",
+            cursor: "pointer",
+            fontSize: "15px",
+          }}
+          onClick={() => (window.location.href = "/")}
+        >
+          ⬅ Back to Home
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -94,7 +148,7 @@ function Countdown() {
 
           <h2
             style={{
-              fontSize: "clamp(28px, 8vw, 50px)", // ✅ scales with screen
+              fontSize: "clamp(28px, 8vw, 50px)",
               letterSpacing: "2px",
               marginTop: "10px",
             }}
@@ -117,9 +171,9 @@ function Countdown() {
             controls
             autoPlay
             style={{
-              width: "100%",           // ✅ full width on mobile
-              maxWidth: "960px",       // ✅ capped on desktop
-              aspectRatio: "16 / 9",  // ✅ always correct proportions
+              width: "100%",
+              maxWidth: "960px",
+              aspectRatio: "16 / 9",
               background: "#000",
             }}
           >
